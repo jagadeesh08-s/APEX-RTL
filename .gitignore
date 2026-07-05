@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pkl
+analysis_history.json
+temp_*.v
+
+# Node dependencies
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
