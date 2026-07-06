@@ -57,7 +57,6 @@ export interface AnalysisReport {
   filename: string;
   timestamp: string;
   code: string;
-  optimized_code?: string;
   node?: string;
   features: RTLFeatures;
   predictions: PPAPredictions;

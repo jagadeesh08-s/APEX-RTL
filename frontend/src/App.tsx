@@ -28,7 +28,6 @@ import { Models } from './components/Models';
 import { Documentation } from './components/Documentation';
 import { Settings } from './components/Settings';
 import { RTLFeatureGrid } from './components/RTLFeatureGrid';
-import Editor from '@monaco-editor/react';
 import { Zap } from 'lucide-react';
 
 import type { AnalysisReport } from './types';
@@ -389,52 +388,7 @@ export default function App() {
                       {/* Actionable Remedies */}
                       <Recommendations recommendations={currentReport.analysis.recommendations} />
 
-                      {/* Side-by-Side Code Comparison */}
-                      {currentReport.optimized_code && (
-                        <div className="glass-card rounded-2xl p-6 w-full space-y-4">
-                          <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                            <div>
-                              <h3 className="text-base font-bold text-text">AI Automated Code Refactoring Assistant</h3>
-                              <p className="text-xs text-muted">Compare your original Verilog code with the optimized, timing-closed remedy output.</p>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[320px]">
-                            {/* Original Code */}
-                            <div className="border border-white/5 rounded-xl overflow-hidden flex flex-col h-full bg-background/30">
-                              <div className="bg-card px-4 py-2 border-b border-white/5 text-[10px] font-bold text-muted uppercase">
-                                Original Code (Bottlenecks Present)
-                              </div>
-                              <div className="flex-1">
-                                <Editor
-                                  height="100%"
-                                  language="verilog"
-                                  theme="vs-dark"
-                                  value={currentReport.code}
-                                  options={{ readOnly: true, minimap: { enabled: false }, fontSize: 11 }}
-                                />
-                              </div>
-                            </div>
 
-                            {/* Optimized Code */}
-                            <div className="border border-primary/20 rounded-xl overflow-hidden flex flex-col h-full bg-primary/5">
-                              <div className="bg-primary/10 px-4 py-2 border-b border-primary/20 text-[10px] font-bold text-primary uppercase flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-ping" />
-                                AI-Refactored Optimized Code
-                              </div>
-                              <div className="flex-1">
-                                <Editor
-                                  height="100%"
-                                  language="verilog"
-                                  theme="vs-dark"
-                                  value={currentReport.optimized_code}
-                                  options={{ readOnly: true, minimap: { enabled: false }, fontSize: 11 }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                     </motion.div>
                   )}
                 </div>

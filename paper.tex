@@ -12,7 +12,7 @@
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 \begin{document}
 
-\title{APEX-RTL: An AI-Powered RTL Code Quality Analyzer and Automated Refactoring Assistant for Digital VLSI Design Space Exploration}
+\title{APEX-RTL: An AI-Powered RTL Code Quality Analyzer for Digital VLSI Design Space Exploration}
 
 \author{\IEEEauthorblockN{Anonymous Authors}
 \IEEEauthorblockA{\textit{Department of Electrical and Computer Engineering} \\
@@ -24,11 +24,11 @@ email@domain.com}
 \maketitle
 
 \begin{abstract}
-Writing efficient Register-Transfer Level (RTL) code is crucial in modern VLSI design, as early-stage code quality heavily influences the final Power, Performance, and Area (PPA) of the integrated circuit. Traditional electronic design automation (EDA) flows only reveal design bottlenecks after logic synthesis and physical design runs, which can take hours or days for complex circuits. This paper introduces APEX-RTL, a lightweight machine learning-based assistant that evaluates RTL Verilog code quality before logic synthesis and automatically generates optimized code refactorings. APEX-RTL parses Verilog code, extracts a 21-dimensional structural feature vector (incorporating a Place-and-Route routing congestion proxy), and employs trained Ridge, Random Forest, Gradient Boosting, XGBoost, and LightGBM models to estimate PPA. The framework is trained on dual technology node datasets (NanGate 45nm bulk planar and ASAP7 7nm FinFET) consisting of 1,000 synthesized designs each. Additionally, the framework computes a Design Quality Score (DQS) driven by feature attributions and generates optimized Verilog code using automated rewrite templates. Our experiments demonstrate that our models achieve high prediction accuracy with $R^2$ scores exceeding 0.992 (Area), 0.987 (Power), and 0.983 (Delay) under NanGate 45nm, and 0.996 (Area), 0.989 (Power), and 0.990 (Delay) under ASAP7 7nm. Evaluation across a 5-design benchmark suite shows that APEX-RTL successfully refactors logic structures, delivering a 7.9\% timing delay reduction on arithmetic datapath critical paths.
+Writing efficient Register-Transfer Level (RTL) code is crucial in modern VLSI design, as early-stage code quality heavily influences the final Power, Performance, and Area (PPA) of the integrated circuit. Traditional electronic design automation (EDA) flows only reveal design bottlenecks after logic synthesis and physical design runs, which can take hours or days for complex circuits. This paper introduces APEX-RTL, a lightweight machine learning-based framework that evaluates RTL Verilog code quality before logic synthesis. APEX-RTL static-parses Verilog code, extracts a 21-dimensional structural feature vector (incorporating a Place-and-Route routing congestion proxy), and employs trained Ridge, Random Forest, Gradient Boosting, XGBoost, and LightGBM models to estimate PPA. The framework is trained on dual technology node datasets (NanGate 45nm bulk planar and ASAP7 7nm FinFET) consisting of 1,000 synthesized designs each. Additionally, the framework computes a Design Quality Score (DQS) driven by feature attributions to provide explainable optimization recommendations. Our experiments demonstrate that our models achieve high prediction accuracy with $R^2$ scores exceeding 0.992 (Area), 0.987 (Power), and 0.983 (Delay) under NanGate 45nm, and 0.996 (Area), 0.989 (Power), and 0.990 (Delay) under ASAP7 7nm. Evaluation across a 5-design benchmark suite shows that APEX-RTL successfully identifies critical timing bottlenecks, enabling code refactoring that yields a 7.9\% timing delay reduction on arithmetic datapath critical paths.
 \end{abstract}
 
 \begin{IEEEkeywords}
-RTL Code Quality, VLSI Design, PPA Prediction, Explainable AI, Automated Code Refactoring, Place-and-Route Congestion, FinFET, Machine Learning.
+RTL Code Quality, VLSI Design, PPA Prediction, Explainable AI, Place-and-Route Congestion, FinFET, Machine Learning.
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -48,7 +48,7 @@ RTL Code $\rightarrow$ Simulation $\rightarrow$ Logic Synthesis $\rightarrow$ Ti
 \hrule
 \medskip
 \textbf{Proposed APEX-RTL Flow:} \\
-RTL Code $\rightarrow$ \textbf{APEX-RTL (Inference \& Auto-Refactoring)} $\rightarrow$ Optimized RTL $\rightarrow$ Synthesis $\rightarrow$ Signoff
+RTL Code $\rightarrow$ \textbf{APEX-RTL (Quality Analysis \& Recommendations)} $\rightarrow$ Optimized RTL $\rightarrow$ Synthesis $\rightarrow$ Signoff
 \medskip
 \end{minipage}
 }
@@ -58,7 +58,7 @@ RTL Code $\rightarrow$ \textbf{APEX-RTL (Inference \& Auto-Refactoring)} $\right
 
 To bypass these delays, recent research has explored machine learning (ML) models to predict post-synthesis PPA directly from RTL descriptions. Recent frameworks, such as MasterRTL \cite{xie2023master} and RTL-Timer \cite{rtltimer}, parse Verilog into intermediate representations like Simple Operator Graphs (SOGs) and train tree-based or Graph Neural Network (GNN) models to estimate PPA.
 
-However, major research gaps remain:
+Looking closely at existing methodologies, major research gaps remain:
 \begin{enumerate}
     \item **Explainability and Feedback:** Existing ML-based PPA tools operate as black-box models. While they can warn a designer that a code block will exceed timing or area budgets, they do not explain *why* the prediction was made, nor do they offer actionable instructions to fix the underlying RTL code.
     \item **Physical Layout Neglect:** Prior pre-synthesis estimators ignore physical wiring routing congestion, leading to optimistic timing predictions that fail post-layout routing.
@@ -70,7 +70,7 @@ To bridge these gaps, this paper presents **APEX-RTL** (\textbf{A}I-powered \tex
     \item A lightweight, compile-free feature extraction pipeline that maps raw Verilog tokens to 21 structural and complexity features, incorporating a Place-and-Route (P\&R) routing congestion factor proxy.
     \item Dual-technology node prediction trained separately on NanGate 45nm bulk planar and ASAP7 7nm FinFET standard cell libraries.
     \item High-accuracy pre-synthesis PPA prediction utilizing state-of-the-art ensemble learning models, including XGBoost, LightGBM, and Gradient Boosting Regressors.
-    \item An automated code-refactoring assistant that generates optimized Verilog code by converting sequential priority chains to parallel case structures and inserting register pipeline stages.
+    \item An explainable design feedback mechanism that assigns a Design Quality Score (DQS) and provides actionable optimization suggestions.
     \item An explainable AI (XAI) feature attribution layer that exposes the primary RTL drivers behind the predicted area, power, and delay metrics.
 \end{itemize}
 
@@ -80,11 +80,11 @@ Early estimation of circuit parameters has been a long-standing goal in Electron
 
 Recently, machine learning has emerged as a viable solution. In \cite{xie2023master}, the authors introduced MasterRTL, which processes RTL code into a Bit-level Simple Operator Graph (SOG) using Yosys to predict worst-case negative slack. Similarly, RTL-Timer \cite{rtltimer} extracts endpoint timing slack pre-synthesis. While GNN-based approaches like GRANNITE \cite{grannite} excel at tracking structural connectivity for power estimation, tree-based ensemble models (e.g., XGBoost, LightGBM, CatBoost) remain highly favored for overall PPA prediction due to their training efficiency, robustness against overfitting, and high predictive power on tabular feature sets.
 
-\subsection{Explainable AI and Automated Refactoring}
-Traditional Linting tools (e.g., Synopsys LEDA, SpyGlass) enforce coding styles and identify syntax violations. However, linting tools rely on strict rule checkers and cannot predict quantitative physical attributes like area or power. APEX-RTL addresses this gap by combining rule-based heuristics with machine learning-driven feature attribution and an automated code refactoring engine that generates optimized Verilog output.
+\subsection{Explainable AI and Recommendations}
+Traditional Linting tools (e.g., Synopsys LEDA, SpyGlass) enforce coding styles and identify syntax violations. However, linting tools rely on strict rule checkers and cannot predict quantitative physical attributes like area or power. APEX-RTL addresses this gap by combining rule-based heuristics with machine learning-driven feature attribution and an explainable design feedback loop.
 
 \section{Proposed Architecture}
-The architecture of APEX-RTL consists of four main modules: the RTL Parser, the ML Prediction Engine, the Heuristic \& AI Assistant Engine, and the Explainable AI Attribution layer (Fig. \ref{fig:arch}).
+The architecture of APEX-RTL consists of four main modules: the RTL Parser, the ML Prediction Engine, the Heuristic Recommendation Engine, and the Explainable AI Attribution layer (Fig. \ref{fig:arch}).
 
 \begin{figure}[h]
 \centering
@@ -97,8 +97,8 @@ The architecture of APEX-RTL consists of four main modules: the RTL Parser, the 
 1. \textbf{Verilog Source Code} \\
 2. $\rightarrow$ \textbf{RTL Parsing Engine} (Extracts 21 structural features) \\
 3. $\rightarrow$ \textbf{ML Prediction Engine} (Dual-node inference for 45nm/7nm) \\
-4. $\rightarrow$ \textbf{AI Refactoring Assistant} (Generates DQS score and optimized RTL) \\
-5. $\rightarrow$ \textbf{Report Dashboard} (Side-by-side PPA metrics, drivers, and code comparison)
+4. $\rightarrow$ \textbf{Heuristic Recommendation Engine} (Generates DQS score and actionable warnings) \\
+5. $\rightarrow$ \textbf{Report Dashboard} (Side-by-side PPA metrics, drivers, and recommendations)
 \end{flushleft}
 \end{minipage}
 }
@@ -139,7 +139,7 @@ The prediction engine trains independent regressor models for the three PPA targ
 \end{equation}
 where $node \in \{45nm, 7nm\}$.
 
-\subsection{AI Refactoring Assistant and Design Quality Score (DQS)}
+\subsection{Design Quality Score (DQS) & Heuristics}
 To evaluate RTL code quality, APEX-RTL computes a Design Quality Score (DQS) normalized from 10.0 to 100.0. The score starts at 100.0 and applies penalty deductions based on heuristic coding infractions and feature attributions:
 \begin{itemize}
     \item \textbf{Deep nested conditions ($D_{if} > 4$):} Deduct 15 points. High nesting indicates long priority encoders that degrade timing.
@@ -149,7 +149,6 @@ To evaluate RTL code quality, APEX-RTL computes a Design Quality Score (DQS) nor
     \item \textbf{Long combinational path ($L_{comb} > 10$):} Deduct 10 points. Indicates series operators lacking register boundaries.
     \item \textbf{High routing congestion ($CF_{PR} > 3.5$):} Deduct 10 points. Indicates potential routing overflows.
 \end{itemize}
-When these infractions are identified, the **AI Refactoring Assistant** automatically rewrites the Verilog source code. It converts nested priority conditions into case statements and automatically inserts register pipeline stages for arithmetic multipliers.
 
 \subsection{Explainable Feature Attribution}
 To explain predictions, we load trained feature importances $I(j, t, node)$ for each feature $j$ and target $t$. We rank features by importance and identify key drivers by comparing the current design's feature value $x_j$ to the average value $\mu_j$ in the training set. If $x_j / \mu_j > 1.25$ and importance is high, it is flagged as a primary driver of high PPA, giving the designer target regions for code review.
@@ -222,7 +221,7 @@ A critical requirement of APEX-RTL is sub-second execution to enable interactive
 In comparison, running a standard commercial logic synthesis flow on the same ALU designs takes an average of 45 seconds (a $7,800\times$ speedup).
 
 \section{Benchmark Suite Case Studies}
-To validate APEX-RTL's ability to drive code optimization, we analyzed the auto-refactoring flow across a 5-design benchmark suite (Table \ref{tab:comparison}).
+To validate APEX-RTL's ability to evaluate coding styles, we analyzed the static analyzer outputs across a 5-design benchmark suite (Table \ref{tab:comparison}).
 
 \begin{table}[h]
 \centering
@@ -250,12 +249,12 @@ Up-Down Counter       & Unoptimized & 85.0 & 3.12 & 1.95 \\
 \end{tabular}
 \end{table}
 
-The refactoring engine successfully flattened nested conditionals (raising the Priority Encoder DQS from 85.0 to 100.0) and inserted pipeline register stages in arithmetic structures (halving the multiplier combinational logic delay from 6.85ns to 3.42ns). In all cases, routing congestion factors were minimized.
+The engine successfully flags deeply nested conditionals (recommending flat case multiplexer structures) and unpipelined arithmetic operations (recommending clock register stages). Designing in compliance with these guidelines reduced critical path delays (e.g., from 6.85ns to 3.42ns in the multiplier) and lowered routing congestion factors.
 
 \section{Conclusion and Future Work}
-This paper presented APEX-RTL, an AI-powered RTL code analyzer and automated refactoring assistant that bridges the gap between pre-synthesis PPA prediction and design-space exploration. By extracting 21 structural Verilog features (incorporating routing congestion) and employing XGBoost/LightGBM models trained on dual nodes (45nm planar / 7nm FinFET), the framework predicts PPA metrics with high precision ($R^2 > 0.98$) in milliseconds. By combining predictive models with an automated rewrite assistant, APEX-RTL automatically repairs priority encoders and unpipelined multipliers, increasing design frequency.
+This paper presented APEX-RTL, an AI-powered RTL code analyzer that bridges the gap between pre-synthesis PPA prediction and design-space exploration. By extracting 21 structural Verilog features (incorporating routing congestion) and employing XGBoost/LightGBM models trained on dual nodes (45nm planar / 7nm FinFET), the framework predicts PPA metrics with high precision ($R^2 > 0.98$) in milliseconds. By combining predictive models with static heuristics, APEX-RTL helps designers identify priority encoders and unpipelined multipliers to optimize operating frequency.
 
-Future work includes integrating abstract syntax tree (AST) GNN models and extending the refactoring engine with large language models (LLMs) to automatically fix complex routing and congestion bottlenecks.
+Future work includes integrating abstract syntax tree (AST) GNN models and extending the engine with automated refactoring modules driven by large language models (LLMs) to automatically fix complex routing and congestion bottlenecks.
 
 \begin{thebibliography}{00}
 \bibitem{xie2023master} Z. Xie et al., ``MasterRTL: A Bit-Level Pre-Synthesis PPA Estimation Framework,'' in \textit{Proceedings of the IEEE/ACM International Conference on Computer-Aided Design (ICCAD)}, pp. 1--9, Nov. 2023.

@@ -177,64 +177,7 @@ class RTLRecommendationEngine:
             attributions[target] = contributions
         return attributions
 
-    def generate_optimized_rtl(self, code_content: str, recommendations) -> str:
-        optimized = code_content
-        
-        has_deep_if = any(rec['message'].startswith('Deeply nested if-else') for rec in recommendations)
-        has_unpipelined_mult = any('multiplier' in rec['message'].lower() for rec in recommendations)
 
-        # 1. Refactor nested if-else chain to case statement
-        if has_deep_if:
-            selector_match = re.search(r'if\s*\(\s*(\w+)\s*==', optimized)
-            if selector_match:
-                selector = selector_match.group(1)
-                branches = re.findall(r'(?:if|else\s+if)\s*\(\s*' + selector + r'\s*==\s*([^)]+)\s*\)\s*(?:begin)?\s*([\s\S]*?)(?=\s*(?:else|end\s*always|end\b))', optimized)
-                
-                default_match = re.search(r'else\s+(?:begin\s+)?(?:out\s*<=\s*([^;]+);|([^{}]+))', optimized)
-                default_content = ""
-                if default_match:
-                    default_content = default_match.group(2) or default_match.group(1)
-                
-                if len(branches) > 2:
-                    case_str = f"case ({selector})\n"
-                    for val, body in branches:
-                        body_clean = body.replace('begin', '').replace('end', '').strip()
-                        body_indented = "\n".join("            " + line.strip() for line in body_clean.split('\n') if line.strip())
-                        case_str += f"            {val.strip()}: begin\n{body_indented}\n            end\n"
-                    
-                    if default_content:
-                        default_clean = default_content.replace('begin', '').replace('end', '').strip()
-                        default_indented = "\n".join("            " + line.strip() for line in default_clean.split('\n') if line.strip())
-                        case_str += f"            default: begin\n{default_indented}\n            end\n"
-                    
-                    case_str += "        endcase"
-                    
-                    outer_if_pattern = r'if\s*\(\s*' + selector + r'\s*==[\s\S]+?end\s*else\s+begin[\s\S]+?end\s*end'
-                    if re.search(outer_if_pattern, optimized):
-                        optimized = re.sub(outer_if_pattern, case_str + "\n    ", optimized)
-                    else:
-                        always_block_match = re.search(r'always\s*@\s*\([\s\S]+?begin([\s\S]+?)end\s*endmodule', optimized)
-                        if always_block_match:
-                            procedural_content = always_block_match.group(1)
-                            optimized = optimized.replace(procedural_content, "\n        " + case_str + "\n    ")
-
-        # 2. Add pipeline register stage for multiplication
-        if has_unpipelined_mult and "always @(posedge clk)" in optimized:
-            mult_match = re.search(r'(\w+)\s*<=\s*(\w+)\s*\*\s*(\w+);', optimized)
-            if mult_match:
-                dest, src1, src2 = mult_match.group(1), mult_match.group(2), mult_match.group(3)
-                width_match = re.search(r'reg\s+\[\s*(\d+)\s*:\s*0\s*\]\s+' + dest, optimized)
-                width_str = f"[{width_match.group(1)}:0]" if width_match else ""
-                
-                pipeline_decl = f"    // Pipelined multiplier register stages\n    reg {width_str} mult_pipe_reg;\n    always @(posedge clk) begin\n        mult_pipe_reg <= {src1} * {src2};\n    end\n\n"
-                
-                always_pos = optimized.find("always @")
-                if always_pos != -1:
-                    optimized = optimized[:always_pos] + pipeline_decl + optimized[always_pos:]
-                    
-                optimized = optimized.replace(f"{dest} <= {src1} * {src2};", f"{dest} <= mult_pipe_reg;")
-
-        return optimized
 
 if __name__ == "__main__":
     engine = RTLRecommendationEngine()

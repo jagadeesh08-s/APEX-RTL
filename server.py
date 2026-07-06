@@ -65,11 +65,9 @@ def run_apex_pipeline(filepath: str, code_content: str, filename: str, node: str
             
     predictions = predictor.predict(features, node=node)
     
-    # 3. Recommendations & Optimized RTL
+    # 3. Recommendations
     engine = RTLRecommendationEngine(node=node)
     analysis = engine.analyze_design(features, predictions)
-    
-    optimized_code = engine.generate_optimized_rtl(code_content, analysis.get("recommendations", []))
     
     # Calculate additional metrics for UI (e.g. Max Frequency)
     delay_val = predictions.get("delay", 10.0)
@@ -89,7 +87,6 @@ def run_apex_pipeline(filepath: str, code_content: str, filename: str, node: str
         "filename": filename,
         "timestamp": datetime.datetime.now().isoformat(),
         "code": code_content,
-        "optimized_code": optimized_code,
         "node": node,
         "features": features,
         "predictions": predictions,
