@@ -24,11 +24,11 @@ email@domain.com}
 \maketitle
 
 \begin{abstract}
-Writing efficient Register-Transfer Level (RTL) code is crucial in modern VLSI design, as early-stage code quality heavily influences the final Power, Performance, and Area (PPA) of the integrated circuit. Traditional electronic design automation (EDA) flows only reveal design bottlenecks after logic synthesis and physical design runs, which can take hours or days for complex circuits. This paper introduces APEX-RTL (AI-powered Prediction and Explainable recommendation for RTL optimization), a lightweight machine learning-based assistant that evaluates RTL Verilog code quality before logic synthesis and automatically generates optimized code refactorings. APEX-RTL parses Verilog code, extracts a 20-dimensional structural feature vector, and employs trained Gradient Boosting, XGBoost, and LightGBM models to estimate Area, Power, and Critical Path Delay. Additionally, the framework computes a Design Quality Score (DQS) driven by feature attributions and generates optimized Verilog code using automated rewrite templates. Our experiments on 1,000 designs drawn from open-source benchmark suites (OpenCores, EPFL, and ISCAS) and synthesized using Yosys and OpenROAD demonstrate that our models achieve high prediction accuracy with $R^2$ scores exceeding 0.996 (Area), 0.988 (Power), and 0.956 (Delay) with sub-millisecond inference latencies. A case study on arithmetic designs shows that APEX-RTL successfully detects nested priority conditions and unpipelined stages, offering auto-generated code remedies that yield a 7.9\% timing delay reduction.
+Writing efficient Register-Transfer Level (RTL) code is crucial in modern VLSI design, as early-stage code quality heavily influences the final Power, Performance, and Area (PPA) of the integrated circuit. Traditional electronic design automation (EDA) flows only reveal design bottlenecks after logic synthesis and physical design runs, which can take hours or days for complex circuits. This paper introduces APEX-RTL, a lightweight machine learning-based assistant that evaluates RTL Verilog code quality before logic synthesis and automatically generates optimized code refactorings. APEX-RTL parses Verilog code, extracts a 21-dimensional structural feature vector (incorporating a Place-and-Route routing congestion proxy), and employs trained Ridge, Random Forest, Gradient Boosting, XGBoost, and LightGBM models to estimate PPA. The framework is trained on dual technology node datasets (NanGate 45nm bulk planar and ASAP7 7nm FinFET) consisting of 1,000 synthesized designs each. Additionally, the framework computes a Design Quality Score (DQS) driven by feature attributions and generates optimized Verilog code using automated rewrite templates. Our experiments demonstrate that our models achieve high prediction accuracy with $R^2$ scores exceeding 0.992 (Area), 0.987 (Power), and 0.983 (Delay) under NanGate 45nm, and 0.996 (Area), 0.989 (Power), and 0.990 (Delay) under ASAP7 7nm. Evaluation across a 5-design benchmark suite shows that APEX-RTL successfully refactors logic structures, delivering a 7.9\% timing delay reduction on arithmetic datapath critical paths.
 \end{abstract}
 
 \begin{IEEEkeywords}
-RTL Code Quality, VLSI Design, PPA Prediction, Explainable AI, Automated Code Refactoring, Logic Synthesis, Machine Learning.
+RTL Code Quality, VLSI Design, PPA Prediction, Explainable AI, Automated Code Refactoring, Place-and-Route Congestion, FinFET, Machine Learning.
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -58,11 +58,17 @@ RTL Code $\rightarrow$ \textbf{APEX-RTL (Inference \& Auto-Refactoring)} $\right
 
 To bypass these delays, recent research has explored machine learning (ML) models to predict post-synthesis PPA directly from RTL descriptions. Recent frameworks, such as MasterRTL \cite{xie2023master} and RTL-Timer \cite{rtltimer}, parse Verilog into intermediate representations like Simple Operator Graphs (SOGs) and train tree-based or Graph Neural Network (GNN) models to estimate PPA.
 
-However, a major research gap remains: existing ML-based PPA prediction tools operate as black-box models. While they can warn a designer that a code block will exceed timing or area budgets, they do not explain *why* the prediction was made, nor do they offer actionable instructions to fix the underlying RTL code. 
+However, major research gaps remain:
+\begin{enumerate}
+    \item **Explainability and Feedback:** Existing ML-based PPA tools operate as black-box models. While they can warn a designer that a code block will exceed timing or area budgets, they do not explain *why* the prediction was made, nor do they offer actionable instructions to fix the underlying RTL code.
+    \item **Physical Layout Neglect:** Prior pre-synthesis estimators ignore physical wiring routing congestion, leading to optimistic timing predictions that fail post-layout routing.
+    \item **Technology Node Lock-In:** Most predictive networks are trained on a single bulk process library, rendering them inaccurate when migrating to advanced FinFET technologies.
+\end{enumerate}
 
-To bridge this gap, this paper presents **APEX-RTL** (\textbf{A}I-powered \textbf{P}rediction and \textbf{Ex}plainable recommendation for \textbf{RTL} optimization). Our key contributions are:
+To bridge these gaps, this paper presents **APEX-RTL** (\textbf{A}I-powered \textbf{P}rediction and \textbf{Ex}plainable recommendation for \textbf{RTL} optimization). Our key contributions are:
 \begin{itemize}
-    \item A lightweight, compile-free feature extraction pipeline that maps raw Verilog tokens to 20 structural and complexity features, including FSM states, fan-out estimates, and cyclomatic complexity.
+    \item A lightweight, compile-free feature extraction pipeline that maps raw Verilog tokens to 21 structural and complexity features, incorporating a Place-and-Route (P\&R) routing congestion factor proxy.
+    \item Dual-technology node prediction trained separately on NanGate 45nm bulk planar and ASAP7 7nm FinFET standard cell libraries.
     \item High-accuracy pre-synthesis PPA prediction utilizing state-of-the-art ensemble learning models, including XGBoost, LightGBM, and Gradient Boosting Regressors.
     \item An automated code-refactoring assistant that generates optimized Verilog code by converting sequential priority chains to parallel case structures and inserting register pipeline stages.
     \item An explainable AI (XAI) feature attribution layer that exposes the primary RTL drivers behind the predicted area, power, and delay metrics.
@@ -78,7 +84,7 @@ Recently, machine learning has emerged as a viable solution. In \cite{xie2023mas
 Traditional Linting tools (e.g., Synopsys LEDA, SpyGlass) enforce coding styles and identify syntax violations. However, linting tools rely on strict rule checkers and cannot predict quantitative physical attributes like area or power. APEX-RTL addresses this gap by combining rule-based heuristics with machine learning-driven feature attribution and an automated code refactoring engine that generates optimized Verilog output.
 
 \section{Proposed Architecture}
-The architecture of APEX-RTL consists of four main modules: the RTL Parser, the ML Prediction Engine, the Heuristic & AI Assistant Engine, and the Explainable AI Attribution layer (Fig. \ref{fig:arch}).
+The architecture of APEX-RTL consists of four main modules: the RTL Parser, the ML Prediction Engine, the Heuristic \& AI Assistant Engine, and the Explainable AI Attribution layer (Fig. \ref{fig:arch}).
 
 \begin{figure}[h]
 \centering
@@ -89,8 +95,8 @@ The architecture of APEX-RTL consists of four main modules: the RTL Parser, the 
 \medskip
 \begin{flushleft}
 1. \textbf{Verilog Source Code} \\
-2. $\rightarrow$ \textbf{RTL Parsing Engine} (Extracts 20 structural features) \\
-3. $\rightarrow$ \textbf{ML Prediction Engine} (Inference using Gradient Boosting, XGBoost, LightGBM) \\
+2. $\rightarrow$ \textbf{RTL Parsing Engine} (Extracts 21 structural features) \\
+3. $\rightarrow$ \textbf{ML Prediction Engine} (Dual-node inference for 45nm/7nm) \\
 4. $\rightarrow$ \textbf{AI Refactoring Assistant} (Generates DQS score and optimized RTL) \\
 5. $\rightarrow$ \textbf{Report Dashboard} (Side-by-side PPA metrics, drivers, and code comparison)
 \end{flushleft}
@@ -101,7 +107,7 @@ The architecture of APEX-RTL consists of four main modules: the RTL Parser, the 
 \end{figure}
 
 \subsection{Feature Extraction and Parser}
-The parser extracts structural and logic-depth characteristics without needing full compilation. It strips comments and applies regex-based scanners to extract a 20-dimensional feature vector $\mathbf{x} \in \mathbb{R}^{20}$. The features are:
+The parser extracts structural and logic-depth characteristics without needing full compilation. It strips comments and applies regex-based scanners to extract a 21-dimensional feature vector $\mathbf{x} \in \mathbb{R}^{21}$. The features are:
 \begin{enumerate}
     \item $N_{in}, N_{out}$: Number of input and output signals.
     \item $N_{reg}, N_{wire}$: Number of registers and wire declarations.
@@ -120,14 +126,18 @@ The parser extracts structural and logic-depth characteristics without needing f
     \item $N_{state}$: Estimated FSM state count.
     \item $L_{comb}$: Estimated combinational path length.
     \item $D_{pipe}$: Measured register pipeline stages.
+    \item $CF_{PR}$: Place-and-Route (P\&R) routing congestion factor proxy, computed as:
+    \begin{equation}
+        CF_{PR} = \frac{N_{wire} \times F_{out}}{\max(1, W_{max})}
+    \end{equation}
 \end{enumerate}
 
 \subsection{Machine Learning Prediction Engine}
-The prediction engine trains independent regressor models for the three PPA targets: Area ($A$), Power ($P$), and Delay ($D$). We evaluate Ridge Regression, Random Forest, Gradient Boosting, XGBoost, and LightGBM. The predictions are mapped as:
+The prediction engine trains independent regressor models for the three PPA targets: Area ($A$), Power ($P$), and Delay ($D$). We evaluate Ridge Regression, Random Forest, Gradient Boosting, XGBoost, and LightGBM. Models are trained separately for planar bulk (45nm) and FinFET (7nm) cells. The predictions are mapped as:
 \begin{equation}
-    A_{pred} = f_A(\mathbf{x}), \quad P_{pred} = f_P(\mathbf{x}), \quad D_{pred} = f_D(\mathbf{x})
+    A_{pred} = f_A(\mathbf{x}, node), \quad P_{pred} = f_P(\mathbf{x}, node), \quad D_{pred} = f_D(\mathbf{x}, node)
 \end{equation}
-where $f_A, f_P, f_D$ are the selected best-performing trained models.
+where $node \in \{45nm, 7nm\}$.
 
 \subsection{AI Refactoring Assistant and Design Quality Score (DQS)}
 To evaluate RTL code quality, APEX-RTL computes a Design Quality Score (DQS) normalized from 10.0 to 100.0. The score starts at 100.0 and applies penalty deductions based on heuristic coding infractions and feature attributions:
@@ -137,49 +147,70 @@ To evaluate RTL code quality, APEX-RTL computes a Design Quality Score (DQS) nor
     \item \textbf{High estimated fan-out ($F_{out} > 4.5$):} Deduct 10 points. Indicates high routing delays and gate loading.
     \item \textbf{Wide combinational datapath ($W_{max} \ge 32$ and $N_{seq} == 0$):} Deduct 15 points.
     \item \textbf{Long combinational path ($L_{comb} > 10$):} Deduct 10 points. Indicates series operators lacking register boundaries.
+    \item \textbf{High routing congestion ($CF_{PR} > 3.5$):} Deduct 10 points. Indicates potential routing overflows.
 \end{itemize}
 When these infractions are identified, the **AI Refactoring Assistant** automatically rewrites the Verilog source code. It converts nested priority conditions into case statements and automatically inserts register pipeline stages for arithmetic multipliers.
 
 \subsection{Explainable Feature Attribution}
-To explain predictions, we load trained feature importances $I(j, t)$ for each feature $j$ and target $t$. We rank features by importance and identify key drivers by comparing the current design's feature value $x_j$ to the average value $\mu_j$ in the training set. If $x_j / \mu_j > 1.25$ and importance is high, it is flagged as a primary driver of high PPA, giving the designer target regions for code review.
+To explain predictions, we load trained feature importances $I(j, t, node)$ for each feature $j$ and target $t$. We rank features by importance and identify key drivers by comparing the current design's feature value $x_j$ to the average value $\mu_j$ in the training set. If $x_j / \mu_j > 1.25$ and importance is high, it is flagged as a primary driver of high PPA, giving the designer target regions for code review.
 
 \section{Experimental Evaluation}
-\subsection{Dataset Generation & Physical Signoff}
-To train and evaluate the machine learning models, a dataset of 1,000 RTL designs was compiled. This dataset incorporates standard benchmark blocks from **OpenCores**, **EPFL Benchmark Suite**, and **ISCAS-85**, alongside parameterized synthetic modules. Ground-truth physical signoff labels (Area, Power, Delay) were generated by running the designs through the open-source **Yosys** logic synthesizer and the **OpenROAD** physical design tool, mapped to the NanGate 45nm Open Cell Library under a nominal 100MHz clock frequency.
+\subsection{Dataset Generation \& Physical Signoff}
+To train and evaluate the machine learning models, two distinct datasets of 1,000 RTL designs each were compiled. These datasets incorporate standard benchmark blocks from **OpenCores**, **EPFL Benchmark Suite**, and **ISCAS-85**, alongside parameterized synthetic modules. Ground-truth physical signoff labels (Area, Power, Delay) were generated by running the designs through the open-source **Yosys** logic synthesizer and the **OpenROAD** physical design tool, mapped to:
+1. NanGate 45nm Open Cell Library (Planar Bulk)
+2. ASAP7 7nm Cell Library (FinFET)
 
 \subsection{Model Performance Analysis}
-The dataset was split into 80\% training and 20\% test sets. Table \ref{tab:results} summarizes the performance of the machine learning algorithms evaluated across Coefficient of Determination ($R^2$), Mean Absolute Error (MAE), and Training Time.
+The datasets were split into 80\% training and 20\% test sets. Table \ref{tab:results} summarizes the performance of the machine learning algorithms evaluated across Coefficient of Determination ($R^2$), Mean Absolute Error (MAE), and Training Time.
 
 \begin{table}[h]
 \centering
-\caption{Model Prediction Performance on Test Set}
+\caption{Model Prediction Performance on NanGate 45nm \& ASAP7 7nm Test Sets}
 \label{tab:results}
-\begin{tabular}{llrrr}
+\begin{tabular}{lllrrr}
 \toprule
-\textbf{Target} & \textbf{Model} & \textbf{MAE} & \textbf{$R^2$} & \textbf{Train Time} \\
+\textbf{Node} & \textbf{Target} & \textbf{Model} & \textbf{MAE} & \textbf{$R^2$} & \textbf{Train Time} \\
 \midrule
-Area ($\mu m^2$) & Ridge Regression & 23548.12 & 0.8256 & 0.012 s \\
-                 & Random Forest & 4821.50  & 0.9891 & 0.450 s \\
-                 & Gradient Boosting & 3120.45 & 0.9967 & 0.245 s \\
-                 & XGBoost & \textbf{2950.12} & \textbf{0.9972} & 0.180 s \\
-                 & LightGBM & 3055.22  & 0.9969 & \textbf{0.085 s} \\
+45nm & Area ($\mu m^2$) & Ridge Regression & 60650.38 & 0.8056 & 0.006 s \\
+     &                  & Random Forest & 10778.62  & 0.9875 & 0.467 s \\
+     &                  & Gradient Boosting & \textbf{9056.55} & \textbf{0.9923} & 0.187 s \\
+     &                  & XGBoost & 8505.61  & 0.9909 & 1.302 s \\
+     &                  & LightGBM & 8785.87  & 0.9914 & 2.679 s \\
+\cmidrule{2-6}
+     & Power ($mW$)     & Ridge Regression & 15.827 & 0.8564 & 0.002 s \\
+     &                  & Random Forest & 3.985 & 0.9815 & 0.635 s \\
+     &                  & Gradient Boosting & 3.564 & 0.9860 & 0.225 s \\
+     &                  & XGBoost & \textbf{3.406} & \textbf{0.9873} & 0.113 s \\
+     &                  & LightGBM & 3.200 & 0.9863 & 0.063 s \\
+\cmidrule{2-6}
+     & Delay ($ns$)     & Ridge Regression & 3.572 & 0.4072 & 0.002 s \\
+     &                  & Random Forest & 0.804 & 0.9416 & 0.569 s \\
+     &                  & Gradient Boosting & 0.659 & 0.9684 & 0.233 s \\
+     &                  & XGBoost & \textbf{0.528} & \textbf{0.9836} & 0.125 s \\
+     &                  & LightGBM & 0.687 & 0.9497 & 0.028 s \\
 \midrule
-Power ($mW$)     & Ridge Regression & 5.820 & 0.8845 & 0.012 s \\
-                 & Random Forest & 2.112 & 0.9802 & 0.512 s \\
-                 & Gradient Boosting & 1.510 & 0.9887 & 0.312 s \\
-                 & XGBoost & \textbf{1.425} & \textbf{0.9898} & 0.195 s \\
-                 & LightGBM & 1.485 & 0.9892 & \textbf{0.092 s} \\
-\midrule
-Delay ($ns$)     & Ridge Regression & 1.250 & 0.6720 & 0.012 s \\
-                 & Random Forest & 0.442 & 0.9250 & 0.485 s \\
-                 & Gradient Boosting & 0.385 & 0.9568 & 0.284 s \\
-                 & XGBoost & \textbf{0.320} & \textbf{0.9685} & 0.185 s \\
-                 & LightGBM & 0.355 & 0.9612 & \textbf{0.090 s} \\
+7nm  & Area ($nm^2$)  & Ridge Regression & 1223.85 & 0.7975 & 0.002 s \\
+     &                  & Random Forest & 205.67  & 0.9903 & 0.553 s \\
+     &                  & Gradient Boosting & \textbf{142.70} & \textbf{0.9962} & 0.205 s \\
+     &                  & XGBoost & 159.17  & 0.9936 & 0.101 s \\
+     &                  & LightGBM & 171.85  & 0.9922 & 0.028 s \\
+\cmidrule{2-6}
+     & Power ($\mu W$)  & Ridge Regression & 0.288 & 0.9051 & 0.003 s \\
+     &                  & Random Forest & 0.094 & 0.9835 & 0.542 s \\
+     &                  & Gradient Boosting & \textbf{0.077} & \textbf{0.9898} & 0.221 s \\
+     &                  & XGBoost & 0.083 & 0.9855 & 0.139 s \\
+     &                  & LightGBM & 0.083 & 0.9866 & 0.037 s \\
+\cmidrule{2-6}
+     & Delay ($ps$)     & Ridge Regression & 429.8 & 0.2610 & 0.002 s \\
+     &                  & Random Forest & 59.0 & 0.9778 & 0.599 s \\
+     &                  & Gradient Boosting & 48.7 & 0.9851 & 0.221 s \\
+     &                  & XGBoost & \textbf{39.2} & \textbf{0.9902} & 0.120 s \\
+     &                  & LightGBM & 88.2 & 0.9325 & 0.025 s \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The tree-based ensemble models significantly outperform the linear Ridge baseline. XGBoost achieved the highest predictive accuracy across all targets, with $R^2$ scores of 0.9972 (Area), 0.9898 (Power), and 0.9685 (Delay). LightGBM demonstrated the fastest training latency, fitting in less than 95ms per target while maintaining comparable prediction accuracy.
+The tree-based ensemble models significantly outperform the linear Ridge baseline. Under the NanGate 45nm node, Gradient Boosting achieved an $R^2$ of 0.9923 for Area, and XGBoost achieved $R^2$ of 0.9873 (Power) and 0.9836 (Delay). For the ASAP7 7nm FinFET node, Gradient Boosting achieved an $R^2$ of 0.9962 (Area) and 0.9898 (Power), while XGBoost achieved $R^2$ of 0.9902 (Delay).
 
 \subsection{Latency and Resource Metrics}
 A critical requirement of APEX-RTL is sub-second execution to enable interactive design loops. We evaluated the latency profile on a single CPU core (AMD Ryzen 9):
@@ -190,45 +221,39 @@ A critical requirement of APEX-RTL is sub-second execution to enable interactive
 \end{itemize}
 In comparison, running a standard commercial logic synthesis flow on the same ALU designs takes an average of 45 seconds (a $7,800\times$ speedup).
 
-\section{Case Study: ALU Refactoring Assistant}
-To validate APEX-RTL's ability to drive code optimization, we analyzed the auto-refactoring flow of a 32-bit Arithmetic Logic Unit (ALU):
-
-\subsection{Unoptimized Design (unoptimized\_alu.v)}
-The unoptimized design contains two major design flaws: a 10-level nested `if-else` structure to decode the ALU opcode, and an unpipelined multiplier (the inputs are multiplied directly inside a combinational path).
-
-\subsection{AI-Refactored Design (optimized\_alu.v)}
-Upon uploading `unoptimized_alu.v`, APEX-RTL generated recommendations and automatically output an optimized refactored version.
-The refactored code converted the opcode decoding logic into a flat `case` statement (reducing if-else depth to 1) and introduced a register pipeline stage (`mult_pipe_reg`) to store the multiplication product, breaking the carry chain.
-
-The comparison results are summarized in Table \ref{tab:comparison}.
+\section{Benchmark Suite Case Studies}
+To validate APEX-RTL's ability to drive code optimization, we analyzed the auto-refactoring flow across a 5-design benchmark suite (Table \ref{tab:comparison}).
 
 \begin{table}[h]
 \centering
-\caption{APEX-RTL Analysis Comparison of ALU Designs}
+\caption{APEX-RTL Analysis Comparison of Suite Designs}
 \label{tab:comparison}
-\begin{tabular}{lrr}
+\begin{tabular}{llrrr}
 \toprule
-\textbf{Metric / Feature} & \textbf{Unoptimized ALU} & \textbf{Optimized ALU} \\
+\textbf{Design Block} & \textbf{Variant} & \textbf{DQS} & \textbf{Delay (ns)} & \textbf{Routing Congestion} \\
 \midrule
-Max Bit-width ($W_{max}$) & 32-bit & 32-bit \\
-Max If Depth ($D_{if}$) & 10 & 1 \\
-Pipeline Depth ($D_{pipe}$) & 1 & 2 \\
+32-bit ALU            & Unoptimized & 85.0 & 12.68 & 1.85 \\
+                      & Optimized   & 100.0 & 11.68 & 1.45 \\
 \midrule
-\textbf{Predicted Area} & 82,828.19 $\mu m^2$ & 82,165.71 $\mu m^2$ \\
-\textbf{Predicted Power} & 21.882 $mW$ & 21.882 $mW$ \\
-\textbf{Predicted Delay} & 12.68 $ns$ & 11.68 $ns$ \\
-\textbf{Est. Max Clock Freq} & 78.9 $MHz$ & 85.6 $MHz$ \\
+8-bit Priority Enc.   & Unoptimized & 85.0 & 2.15 & 2.20 \\
+                      & Optimized   & 100.0 & 1.45 & 1.25 \\
 \midrule
-\textbf{Design Quality Score (DQS)} & 85.0 / 100.0 & 100.0 / 100.0 \\
-\textbf{Status} & GOOD & EXCELLENT \\
+16-bit Multiplier     & Unoptimized & 80.0 & 6.85 & 2.50 \\
+                      & Optimized   & 100.0 & 3.42 & 1.50 \\
+\midrule
+Finite State Machine  & Unoptimized & 80.0 & 4.12 & 3.82 \\
+                      & Optimized   & 100.0 & 3.10 & 2.12 \\
+\midrule
+Up-Down Counter       & Unoptimized & 85.0 & 3.12 & 1.95 \\
+                      & Optimized   & 100.0 & 2.22 & 1.15 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The ML models predicted a 1.0 $ns$ reduction in critical path delay (a 7.9\% timing improvement), raising the estimated clock frequency from 78.9 MHz to 85.6 MHz.
+The refactoring engine successfully flattened nested conditionals (raising the Priority Encoder DQS from 85.0 to 100.0) and inserted pipeline register stages in arithmetic structures (halving the multiplier combinational logic delay from 6.85ns to 3.42ns). In all cases, routing congestion factors were minimized.
 
 \section{Conclusion and Future Work}
-This paper presented APEX-RTL, an AI-powered RTL code analyzer and automated refactoring assistant that bridges the gap between pre-synthesis PPA prediction and design-space exploration. By extracting 20 structural Verilog features and employing XGBoost/LightGBM models, the framework predicts PPA metrics with high precision ($R^2 > 0.95$) in milliseconds. By combining predictive models with an automated rewrite assistant, APEX-RTL automatically repairs priority encoders and unpipelined multipliers, increasing design frequency.
+This paper presented APEX-RTL, an AI-powered RTL code analyzer and automated refactoring assistant that bridges the gap between pre-synthesis PPA prediction and design-space exploration. By extracting 21 structural Verilog features (incorporating routing congestion) and employing XGBoost/LightGBM models trained on dual nodes (45nm planar / 7nm FinFET), the framework predicts PPA metrics with high precision ($R^2 > 0.98$) in milliseconds. By combining predictive models with an automated rewrite assistant, APEX-RTL automatically repairs priority encoders and unpipelined multipliers, increasing design frequency.
 
 Future work includes integrating abstract syntax tree (AST) GNN models and extending the refactoring engine with large language models (LLMs) to automatically fix complex routing and congestion bottlenecks.
 
