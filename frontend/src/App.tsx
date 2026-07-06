@@ -43,6 +43,7 @@ export default function App() {
   // API settings
   const [apiEndpoint, setApiEndpoint] = useState<string>('http://localhost:8000');
   const [modelVersion, setModelVersion] = useState<string>('v1.0.0-gb');
+  const [apiOnline, setApiOnline] = useState<boolean>(false);
   
   // History & Models State
   const [history, setHistory] = useState<AnalysisReport[]>([]);
@@ -61,13 +62,11 @@ export default function App() {
     try {
       const res = await axios.get(`${apiEndpoint}/api/history`);
       setHistory(res.data);
+      setApiOnline(true);
     } catch (err) {
-      console.warn("Could not load history from API server. Running with local mock database.");
-      // Seed with some mock reports on load
-      const savedMock = localStorage.getItem('apex_mock_history');
-      if (savedMock) {
-        setHistory(JSON.parse(savedMock));
-      }
+      console.warn("Could not load history from API server.");
+      setHistory([]);
+      setApiOnline(false);
     } finally {
       setIsLoadingHistory(false);
     }
@@ -77,35 +76,36 @@ export default function App() {
     try {
       const res = await axios.get(`${apiEndpoint}/api/models`);
       setModelStats(res.data);
+      setApiOnline(true);
     } catch (err) {
-      console.warn("Could not load model stats. Fallback to default weights.");
+      console.warn("Could not load model stats.");
+      setApiOnline(false);
     }
   };
 
-  const handleAnalysisSuccess = (report: AnalysisReport) => {
+  const handleAnalysisSuccess = (report: AnalysisReport | null) => {
+    if (report === null) {
+      setCurrentReport(null);
+      setIsAnalyzing(false);
+      return;
+    }
     setCurrentReport(report);
     setIsAnalyzing(false);
+    setApiOnline(true);
     
     // Add to local state history
-    setHistory((prev) => {
-      const updated = [report, ...prev.filter(item => item.id !== report.id)];
-      // Persist locally in case backend is offline
-      localStorage.setItem('apex_mock_history', JSON.stringify(updated.slice(0, 30)));
-      return updated;
-    });
+    setHistory((prev) => [report, ...prev.filter(item => item.id !== report.id)]);
   };
 
   const handleDeleteReport = async (id: string) => {
     try {
       await axios.delete(`${apiEndpoint}/api/history/${id}`);
+      setApiOnline(true);
     } catch (err) {
-      console.warn("Could not delete from backend database. Cleaning from local store.");
+      console.warn("Could not delete from backend database.");
+      setApiOnline(false);
     }
-    setHistory((prev) => {
-      const updated = prev.filter(item => item.id !== id);
-      localStorage.setItem('apex_mock_history', JSON.stringify(updated));
-      return updated;
-    });
+    setHistory((prev) => prev.filter(item => item.id !== id));
     if (currentReport?.id === id) {
       setCurrentReport(null);
     }
@@ -235,6 +235,19 @@ export default function App() {
                 apex_rtl_framework
               </span>
             </div>
+
+            {/* API Connection Indicator */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted">API:</span>
+              <span className={`font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 text-[10px] uppercase tracking-wider ${
+                apiOnline 
+                  ? 'bg-success/10 border-success/20 text-success' 
+                  : 'bg-danger/10 border-danger/20 text-danger animate-pulse'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${apiOnline ? 'bg-success' : 'bg-danger'}`} />
+                {apiOnline ? 'Online' : 'Offline'}
+              </span>
+            </div>
           </div>
 
           {/* Quick Actions Panel */}
@@ -360,7 +373,7 @@ export default function App() {
                         
                         <div className="lg:col-span-3 space-y-6">
                           {/* PPA Estimate cards */}
-                          <PPAEstimation predictions={currentReport.predictions} />
+                          <PPAEstimation predictions={currentReport.predictions} node={currentReport.node} />
                           
                           {/* Circular score gauge */}
                           <DQSGauge score={currentReport.analysis.design_quality_score} />
@@ -444,6 +457,7 @@ export default function App() {
                   modelStats={modelStats}
                   onRetrain={handleRetrain}
                   isTraining={isTraining}
+                  apiEndpoint={apiEndpoint}
                 />
               )}
 

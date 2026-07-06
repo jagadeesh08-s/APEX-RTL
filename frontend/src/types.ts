@@ -24,6 +24,7 @@ export interface RTLFeatures {
   fsm_state_count: number;
   combinational_path_len: number;
   pipeline_depth: number;
+  routing_congestion_factor: number;
 }
 
 export interface PPAPredictions {
@@ -57,6 +58,7 @@ export interface AnalysisReport {
   timestamp: string;
   code: string;
   optimized_code?: string;
+  node?: string;
   features: RTLFeatures;
   predictions: PPAPredictions;
   analysis: {

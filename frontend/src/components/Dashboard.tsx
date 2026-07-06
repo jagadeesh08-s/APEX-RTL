@@ -11,37 +11,322 @@ interface DashboardProps {
   onTimelineStepChange: (step: number) => void;
 }
 
+const TEMPLATES: Record<string, { unoptimized: string; optimized: string; filename: string }> = {
+  alu: {
+    filename: 'alu_32bit.v',
+    unoptimized: `module unoptimized_alu (
+    input clk,
+    input [3:0] op,
+    input [31:0] a,
+    input [31:0] b,
+    output reg [31:0] out
+);
+    always @(posedge clk) begin
+        if (op == 4'b0000) begin
+            out <= a + b;
+        end else if (op == 4'b0001) begin
+            out <= a - b;
+        end else if (op == 4'b0010) begin
+            out <= a * b; // Combinational multiplication
+        end else if (op == 4'b0011) begin
+            out <= a / b;
+        end else if (op == 4'b0100) begin
+            out <= a & b;
+        end else if (op == 4'b0101) begin
+            out <= a | b;
+        end else if (op == 4'b0110) begin
+            out <= a ^ b;
+        end else if (op == 4'b0111) begin
+            out <= ~a;
+        end else begin
+            out <= 32'd0;
+        end
+    end
+endmodule
+`,
+    optimized: `module optimized_alu (
+    input clk,
+    input [3:0] op,
+    input [31:0] a,
+    input [31:0] b,
+    output reg [31:0] out
+);
+    // Latch product in register to pipeline the multiplication
+    reg [31:0] mult_reg;
+    always @(posedge clk) begin
+        mult_reg <= a * b;
+    end
+
+    always @(posedge clk) begin
+        case (op)
+            4'b0000: out <= a + b;
+            4'b0001: out <= a - b;
+            4'b0010: out <= mult_reg; // Flat case and pipelined multiplier
+            4'b0011: out <= a / b;
+            4'b0100: out <= a & b;
+            4'b0101: out <= a | b;
+            4'b0110: out <= a ^ b;
+            4'b0111: out <= ~a;
+            default: out <= 32'd0;
+        end
+    end
+endmodule
+`
+  },
+  priority_encoder: {
+    filename: 'priority_encoder.v',
+    unoptimized: `module priority_encoder_bad(
+    input [7:0] in,
+    output reg [2:0] out
+);
+
+always @(*) begin
+    if(in[7])
+        out = 3'b111;
+    else if(in[6])
+        out = 3'b110;
+    else if(in[5])
+        out = 3'b101;
+    else if(in[4])
+        out = 3'b100;
+    else if(in[3])
+        out = 3'b011;
+    else if(in[2])
+        out = 3'b010;
+    else if(in[1])
+        out = 3'b001;
+    else if(in[0])
+        out = 3'b000;
+    else
+        out = 3'b000;
+end
+
+endmodule
+`,
+    optimized: `module priority_encoder_good(
+    input [7:0] in,
+    output reg [2:0] out
+);
+
+always @(*) begin
+    casez(in)
+        8'b1???????: out = 3'b111;
+        8'b01??????: out = 3'b110;
+        8'b001?????: out = 3'b101;
+        8'b0001????: out = 3'b100;
+        8'b00001???: out = 3'b011;
+        8'b000001??: out = 3'b010;
+        8'b0000001?: out = 3'b001;
+        8'b00000001: out = 3'b000;
+        default:     out = 3'b000;
+    endcase
+end
+
+endmodule
+`
+  },
+  multiplier: {
+    filename: 'multiplier.v',
+    unoptimized: `module multiplier_bad(
+    input [15:0] a,
+    input [15:0] b,
+    output reg [31:0] y
+);
+
+always @(*) begin
+    y = a * b; // Combinational multiplier path without pipeline stage
+end
+
+endmodule
+`,
+    optimized: `module multiplier_good(
+    input clk,
+    input [15:0] a,
+    input [15:0] b,
+    output reg [31:0] y
+);
+
+reg [31:0] mult_stage;
+
+always @(posedge clk) begin
+    mult_stage <= a * b; // Intermediate register pipeline stage
+    y <= mult_stage;
+end
+
+endmodule
+`
+  },
+  fsm: {
+    filename: 'fsm.v',
+    unoptimized: `module fsm_bad(
+    input clk,
+    input rst_n,
+    input start,
+    input ready,
+    output reg [1:0] out
+);
+    reg [2:0] state;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state <= 3'd0;
+            out <= 2'b00;
+        end else begin
+            // Nested branching conditionals inside state logic
+            if (state == 3'd0) begin
+                if (start) begin
+                    state <= 3'd1;
+                end
+            end else if (state == 3'd1) begin
+                if (ready) begin
+                    state <= 3'd2;
+                    out <= 2'b01;
+                end else if (!start) begin
+                    state <= 3'd0;
+                end
+            end else if (state == 3'd2) begin
+                if (ready) begin
+                    state <= 3'd3;
+                    out <= 2'b10;
+                end
+            end else if (state == 3'd3) begin
+                state <= 3'd0;
+                out <= 2'b11;
+            end else begin
+                state <= 3'd0;
+            end
+        end
+    end
+endmodule
+`,
+    optimized: `module fsm_good(
+    input clk,
+    input rst_n,
+    input start,
+    input ready,
+    output reg [1:0] out
+);
+    localparam STATE_IDLE = 2'b00;
+    localparam STATE_RUN  = 2'b01;
+    localparam STATE_WAIT = 2'b10;
+    localparam STATE_DONE = 2'b11;
+
+    reg [1:0] curr_state, next_state;
+
+    // Sequential state transfer
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            curr_state <= STATE_IDLE;
+        end else begin
+            curr_state <= next_state;
+        end
+    end
+
+    // Parallel case state transition logic
+    always @(*) begin
+        next_state = curr_state;
+        out = 2'b00;
+        case (curr_state)
+            STATE_IDLE: begin
+                if (start) next_state = STATE_RUN;
+            end
+            STATE_RUN: begin
+                if (ready) begin
+                    next_state = STATE_WAIT;
+                    out = 2'b01;
+                end else if (!start) begin
+                    next_state = STATE_IDLE;
+                end
+            end
+            STATE_WAIT: begin
+                if (ready) begin
+                    next_state = STATE_DONE;
+                    out = 2'b10;
+                end
+            end
+            STATE_DONE: begin
+                next_state = STATE_IDLE;
+                out = 2'b11;
+            end
+            default: next_state = STATE_IDLE;
+        endcase
+    end
+endmodule
+`
+  },
+  counter: {
+    filename: 'counter.v',
+    unoptimized: `module counter_bad(
+    input clk,
+    input rst_n,
+    input up_down,
+    input enable,
+    output reg [7:0] count
+);
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        count <= 8'd0;
+    end else begin
+        // Redundant branching and nested ifs inside counter logic
+        if (enable) begin
+            if (up_down) begin
+                if (count == 8'd255) begin
+                    count <= 8'd0;
+                end else begin
+                    count <= count + 8'd1;
+                end
+            end else begin
+                if (count == 8'd0) begin
+                    count <= 8'd255;
+                end else begin
+                    count <= count - 8'd1;
+                end
+            end
+        end
+    end
+end
+
+endmodule
+`,
+    optimized: `module counter_good(
+    input clk,
+    input rst_n,
+    input up_down,
+    input enable,
+    output reg [7:0] count
+);
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        count <= 8'd0;
+    end else if (enable) begin
+        // Optimized flattened logic
+        count <= up_down ? (count + 8'd1) : (count - 8'd1);
+    end
+end
+
+endmodule
+`
+  }
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({
   onAnalysisSuccess,
   onAnalysisStart,
   isAnalyzing,
   onTimelineStepChange,
 }) => {
-  const [fileContent, setFileContent] = useState<string>(`// Write or upload your Verilog design here
-module alu_16bit (
-    input clk,
-    input [3:0] op,
-    input [15:0] a,
-    input [15:0] b,
-    output reg [15:0] out
-);
-    always @(posedge clk) begin
-        if (op == 4'b0001) begin
-            out <= a + b;
-        end else if (op == 4'b0010) begin
-            out <= a - b;
-        end else if (op == 4'b0011) begin
-            out <= a * b; // Combinational multiplier
-        end else begin
-            out <= 16'd0;
-        end
-    end
-endmodule
-`);
-  const [filename, setFilename] = useState<string>('design.v');
+  const [fileContent, setFileContent] = useState<string>(TEMPLATES.alu.unoptimized);
+  const [filename, setFilename] = useState<string>('alu_unoptimized.v');
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+
+  // Selector state variables
+  const [selectedDesign, setSelectedDesign] = useState<string>('alu');
+  const [selectedStyle, setSelectedStyle] = useState<'unoptimized' | 'optimized'>('unoptimized');
+  const [activeNode, setActiveNode] = useState<string>('45nm');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,7 +382,6 @@ endmodule
     onTimelineStepChange(1); // Upload step
 
     try {
-      // Create progress ticks to make user experience feel extremely fluid
       const interval = setInterval(() => {
         setProgress((old) => {
           if (old >= 90) {
@@ -109,12 +393,13 @@ endmodule
           if (old === 75) onTimelineStepChange(4); // Quality Evaluation
           return old + 10;
         });
-      }, 350);
+      }, 250);
 
-      // Perform POST request to FastAPI
+      // Perform POST request to FastAPI with strictly node parameter
       const formData = new FormData();
       const codeBlob = new Blob([fileContent], { type: 'text/plain' });
       formData.append('file', codeBlob, filename);
+      formData.append('node', activeNode);
       
       const response = await axios.post('http://localhost:8000/api/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -124,200 +409,31 @@ endmodule
       setProgress(100);
       onTimelineStepChange(5); // Recommendation / Optimization
       
-      // Artificial short delay to show 100% completion glow
       setTimeout(() => {
         onAnalysisSuccess(response.data);
         onTimelineStepChange(6); // Final Report
-      }, 500);
+      }, 350);
 
     } catch (err: any) {
       console.error(err);
-      // Fallback to Mock Data if API Server is down
-      setError("FastAPI server offline. Running analysis in standalone Mock mode.");
-      simulateMockAnalysis();
+      clearInterval(progress);
+      setProgress(0);
+      onTimelineStepChange(0);
+      onAnalysisSuccess(null);
+      setError("Failed to connect to APEX-RTL API server. Please start the backend by running 'python server.py' in your local terminal on port 8000.");
     }
   };
 
-  const simulateMockAnalysis = () => {
-    let mockDQS = 85.0;
-    let mockArea = 82828.19;
-    let mockPower = 21.882;
-    let mockDelay = 12.68;
-    let mockRecommendations: any[] = [];
-    let mockAttributions: any = { area: [], power: [], delay: [] };
-
-    // Heuristics based on keyword checks in mock code
-    const lowerCode = fileContent.toLowerCase();
-    const hasMultiplier = lowerCode.includes('*');
-    const matchesIf = (lowerCode.match(/\bif\b/g) || []).length;
-
-    if (matchesIf > 6) {
-      mockDQS -= 15;
-      mockRecommendations.push({
-        severity: "WARNING",
-        category: "TIMING",
-        message: `Deeply nested if-else structure detected (estimated depth = ${matchesIf}).`,
-        explanation: "Verilog if-else structures synthesize to sequential priority encoders. This adds logic gates in series, increasing critical path delay and limiting maximum clock frequency.",
-        remedy: "Refactor nested if-else structures into 'case' statements where selection signals are mutually exclusive, allowing synthesis tools to build parallel multiplexers."
-      });
-    }
-
-    if (hasMultiplier && lowerCode.includes('always @') && !lowerCode.includes('posedge clk')) {
-      mockDQS -= 20;
-      mockRecommendations.push({
-        severity: "CRITICAL",
-        category: "TIMING & FREQUENCY",
-        message: "Design contains arithmetic multipliers with low pipelining.",
-        explanation: "Multiplication is a hardware-heavy operation. Carrying out multiplication in purely combinational paths increases the gate delay exponentially, creating massive critical paths.",
-        remedy: "Introduce a pipeline stage by latching the multiplier inputs or storing the product in a register clocked by 'posedge clk'."
-      });
-    }
-
-    if (mockRecommendations.length === 0) {
-      mockDQS = 100.0;
-      mockDelay = 11.68;
-    }
-
-    // Set attributions
-    mockAttributions = {
-      area: [
-        { feature: 'bitwidth_max', importance: 0.78, current_value: 32, average_value: 17.8, impact_direction: 'high_driver' },
-        { feature: 'num_multipliers', importance: 0.19, current_value: hasMultiplier ? 2 : 0, average_value: 1.0, impact_direction: hasMultiplier ? 'high_driver' : 'neutral' }
-      ],
-      power: [
-        { feature: 'bitwidth_max', importance: 0.83, current_value: 32, average_value: 17.8, impact_direction: 'high_driver' },
-        { feature: 'num_multipliers', importance: 0.10, current_value: hasMultiplier ? 2 : 0, average_value: 1.0, impact_direction: hasMultiplier ? 'high_driver' : 'neutral' }
-      ],
-      delay: [
-        { feature: 'num_multipliers', importance: 0.43, current_value: hasMultiplier ? 2 : 0, average_value: 1.0, impact_direction: hasMultiplier ? 'high_driver' : 'neutral' },
-        { feature: 'sequential_ratio', importance: 0.30, current_value: 0.5, average_value: 0.6, impact_direction: 'lowering_factor' }
-      ]
-    };
-
-    const mockReport = {
-      id: "mock-run-" + Math.random().toString(36).substring(7),
-      filename: filename,
-      timestamp: new Date().toISOString(),
-      code: fileContent,
-      features: {
-        num_inputs: 5,
-        num_outputs: 2,
-        num_registers: 3,
-        num_wires: 0,
-        num_always_sequential: 1,
-        num_always_combinational: 1,
-        num_assigns: 0,
-        num_case_statements: 0,
-        num_arithmetic_ops: hasMultiplier ? 4 : 2,
-        num_multipliers: hasMultiplier ? 2 : 0,
-        num_logical_ops: 4,
-        bitwidth_max: 32,
-        max_if_depth: matchesIf,
-        sequential_ratio: 0.5
-      },
-      predictions: {
-        area: mockArea,
-        power: mockPower,
-        delay: mockDelay,
-        max_frequency: 1000.0 / mockDelay
-      },
-      analysis: {
-        design_quality_score: Math.max(10.0, mockDQS),
-        deductions: matchesIf > 6 ? [["Nested if-else chain depth", 15]] : [],
-        recommendations: mockRecommendations,
-        attributions: mockAttributions
-      }
-    };
-
-    const interval = setInterval(() => {
-      setProgress((old) => {
-        if (old >= 90) {
-          clearInterval(interval);
-          return 90;
-        }
-        if (old === 20) onTimelineStepChange(2);
-        if (old === 50) onTimelineStepChange(3);
-        if (old === 75) onTimelineStepChange(4);
-        return old + 15;
-      });
-    }, 150);
-
-    setTimeout(() => {
-      clearInterval(interval);
-      setProgress(100);
-      onTimelineStepChange(5);
-      
-      setTimeout(() => {
-        onAnalysisSuccess(mockReport);
-        onTimelineStepChange(6);
-      }, 250);
-    }, 1000);
-  };
-
-  const loadSample = (type: 'unoptimized' | 'optimized') => {
+  const handleBenchmarkSelect = (design: string, style: 'unoptimized' | 'optimized') => {
     setError(null);
-    if (type === 'unoptimized') {
-      setFilename('unoptimized_alu.v');
-      setFileContent(`module unoptimized_alu (
-    input clk,
-    input [3:0] op,
-    input [31:0] a,
-    input [31:0] b,
-    output reg [31:0] out
-);
-    always @(posedge clk) begin
-        if (op == 4'b0000) begin
-            out <= a + b;
-        end else if (op == 4'b0001) begin
-            out <= a - b;
-        end else if (op == 4'b0010) begin
-            out <= a * b; // Combinational multiplication
-        end else if (op == 4'b0011) begin
-            out <= a / b;
-        end else if (op == 4'b0100) begin
-            out <= a & b;
-        end else if (op == 4'b0101) begin
-            out <= a | b;
-        end else if (op == 4'b0110) begin
-            out <= a ^ b;
-        end else if (op == 4'b0111) begin
-            out <= ~a;
-        end else begin
-            out <= 32'd0;
-        end
-    end
-endmodule
-`);
-    } else {
-      setFilename('optimized_alu.v');
-      setFileContent(`module optimized_alu (
-    input clk,
-    input [3:0] op,
-    input [31:0] a,
-    input [31:0] b,
-    output reg [31:0] out
-);
-    // Latch product in register to pipeline the multiplication
-    reg [31:0] mult_reg;
-    always @(posedge clk) begin
-        mult_reg <= a * b;
-    end
-
-    always @(posedge clk) begin
-        case (op)
-            4'b0000: out <= a + b;
-            4'b0001: out <= a - b;
-            4'b0010: out <= mult_reg; // Flat case and pipelined multiplier
-            4'b0011: out <= a / b;
-            4'b0100: out <= a & b;
-            4'b0101: out <= a | b;
-            4'b0110: out <= a ^ b;
-            4'b0111: out <= ~a;
-            default: out <= 32'd0;
-        end
-    end
-endmodule
-`);
+    setSelectedDesign(design);
+    setSelectedStyle(style);
+    
+    const template = TEMPLATES[design];
+    if (template) {
+      setFileContent(template[style]);
+      const suffix = style === 'unoptimized' ? '_bad.v' : '_good.v';
+      setFilename(design + suffix);
     }
   };
 
@@ -328,7 +444,7 @@ endmodule
         <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
           <Sparkles className="w-48 h-48 text-accent animate-pulse" />
         </div>
-        <div className="relative z-10 max-w-2xl">
+        <div className="relative z-10 max-w-3xl">
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -338,46 +454,95 @@ endmodule
               AI-Powered EDA Tool
             </span>
           </motion.div>
+          
           <h1 className="text-3xl font-extrabold tracking-tight text-text mb-3">
             AI-Assisted RTL Code Quality Analyzer
           </h1>
           <p className="text-sm text-muted leading-relaxed mb-6">
             Evaluate design parameters prior to hardware synthesis. Predict post-synthesis Power, Performance, and Area (PPA) in seconds using machine learning, and refactor bottlenecks with explainable suggestions.
           </p>
-          <div className="flex flex-wrap gap-3">
-            <button 
-              onClick={() => fileInputRef.current?.click()} 
-              className="px-4 py-2 text-xs font-semibold rounded-xl bg-card border border-white/10 hover:border-primary/40 hover:bg-primary/10 text-text transition-all duration-200"
-            >
-              Upload RTL File
-            </button>
-            <button 
-              onClick={() => loadSample('unoptimized')} 
-              className="px-4 py-2 text-xs font-semibold rounded-xl bg-primary hover:bg-primary/80 text-text shadow-glow hover:shadow-primary/45 transition-all duration-200"
-            >
-              Analyze Unoptimized ALU
-            </button>
-            <button 
-              onClick={() => loadSample('optimized')} 
-              className="px-4 py-2 text-xs font-semibold rounded-xl bg-secondary hover:bg-secondary/80 text-text shadow-blueGlow hover:shadow-secondary/45 transition-all duration-200"
-            >
-              Analyze Optimized ALU
-            </button>
+          
+          {/* Controls Panel */}
+          <div className="flex flex-wrap items-center gap-4 bg-background/50 p-4 rounded-2xl border border-white/5">
+            {/* Design selector */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-bold text-muted uppercase tracking-wider">Select Design</label>
+              <select
+                value={selectedDesign}
+                onChange={(e) => handleBenchmarkSelect(e.target.value, selectedStyle)}
+                className="px-3 py-1.5 bg-card border border-white/10 rounded-xl text-xs text-text focus:outline-none focus:border-primary transition-all cursor-pointer"
+              >
+                <option value="alu">32-bit ALU</option>
+                <option value="priority_encoder">8-bit Priority Encoder</option>
+                <option value="multiplier">16-bit Multiplier</option>
+                <option value="fsm">Finite State Machine (FSM)</option>
+                <option value="counter">Up-Down Counter</option>
+              </select>
+            </div>
+
+            {/* Style Selector */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-bold text-muted uppercase tracking-wider">Style Variant</label>
+              <div className="flex bg-card border border-white/10 rounded-xl p-0.5">
+                <button
+                  onClick={() => handleBenchmarkSelect(selectedDesign, 'unoptimized')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    selectedStyle === 'unoptimized' 
+                      ? 'bg-danger/20 text-danger border border-danger/30' 
+                      : 'text-muted hover:text-text'
+                  }`}
+                >
+                  Unoptimized
+                </button>
+                <button
+                  onClick={() => handleBenchmarkSelect(selectedDesign, 'optimized')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    selectedStyle === 'optimized' 
+                      ? 'bg-success/20 text-success border border-success/30' 
+                      : 'text-muted hover:text-text'
+                  }`}
+                >
+                  Optimized
+                </button>
+              </div>
+            </div>
+
+            {/* Tech Node Selector */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-bold text-muted uppercase tracking-wider">Target Node</label>
+              <select
+                value={activeNode}
+                onChange={(e) => setActiveNode(e.target.value)}
+                className="px-3 py-1.5 bg-card border border-white/10 rounded-xl text-xs text-text focus:outline-none focus:border-primary transition-all cursor-pointer"
+              >
+                <option value="45nm">NanGate 45nm Bulk Planar</option>
+                <option value="7nm">ASAP7 7nm FinFET Technology</option>
+              </select>
+            </div>
+
+            <div className="flex items-end h-full pt-4">
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-card border border-white/10 hover:border-primary/40 hover:bg-primary/10 text-text transition-all duration-200"
+              >
+                Upload File
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 rounded-2xl bg-danger/10 border border-danger/20 text-danger text-xs flex items-center gap-2.5">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{error}</span>
+        <div className="p-4 rounded-2xl bg-danger/10 border border-danger/20 text-danger text-xs flex items-center gap-2.5 shadow-lg">
+          <AlertCircle className="w-5 h-5 flex-shrink-0 text-danger animate-pulse" />
+          <span className="leading-relaxed">{error}</span>
         </div>
       )}
 
       {/* Main Workspace (Split Upload & Code preview) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Upload Card */}
+        {/* Upload & Run Controls */}
         <div className="lg:col-span-1 flex flex-col gap-6">
           <div 
             onDragEnter={handleDrag}

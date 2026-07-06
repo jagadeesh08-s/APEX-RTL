@@ -1,12 +1,14 @@
+import React from 'react';
 import { motion } from 'framer-motion';
 import { LayoutGrid, Zap, Timer, Activity, TrendingUp, TrendingDown } from 'lucide-react';
 import type { PPAPredictions } from '../types';
 
 interface PPAEstimationProps {
   predictions: PPAPredictions;
+  node?: string;
 }
 
-export const PPAEstimation: React.FC<PPAEstimationProps> = ({ predictions }) => {
+export const PPAEstimation: React.FC<PPAEstimationProps> = ({ predictions, node = '45nm' }) => {
   const area = predictions.area ?? 0;
   const power = predictions.power ?? 0;
   const delay = predictions.delay ?? 0;
@@ -14,25 +16,43 @@ export const PPAEstimation: React.FC<PPAEstimationProps> = ({ predictions }) => 
   // Calculate max frequency
   const maxFreq = predictions.max_frequency ?? (delay > 0 ? 1000 / delay : 0);
 
+  // Dynamic values and units based on technology node
+  const is7nm = node === '7nm';
+  
+  const areaVal = area.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const areaUnit = is7nm ? 'nm²' : 'μm²';
+  
+  // Power: 7nm is in microWatts (mW * 1000)
+  const powerVal = is7nm ? (power * 1000).toFixed(1) : power.toFixed(3);
+  const powerUnit = is7nm ? 'μW' : 'mW';
+  
+  // Delay: 7nm is in picoseconds (ns * 1000)
+  const delayVal = is7nm ? (delay * 1000).toFixed(0) : delay.toFixed(2);
+  const delayUnit = is7nm ? 'ps' : 'ns';
+  
+  // Fmax: if delay is small, Fmax could cross into GHz
+  const isGHz = (maxFreq / 1000) >= 1.0;
+  const freqVal = isGHz ? (maxFreq / 1000).toFixed(2) : maxFreq.toFixed(1);
+  const freqUnit = isGHz ? 'GHz' : 'MHz';
+
   const cards = [
     {
       title: 'Estimated Area',
-      value: area.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-      unit: 'μm²',
-      desc: 'Total cell footprint',
+      value: areaVal,
+      unit: areaUnit,
+      desc: is7nm ? 'FinFET layout area footprint' : 'Total cell bulk area footprint',
       icon: LayoutGrid,
       color: 'from-primary/20 to-primary/5 border-primary/20',
       glow: 'shadow-glow',
       textColor: 'text-primary',
-      // Mock sparkline values
       points: [1.2, 1.4, 1.1, 1.3, 1.0, 1.1, 0.9],
       trend: { direction: 'down', text: '5.2% reduction' },
     },
     {
       title: 'Estimated Power',
-      value: power.toFixed(3),
-      unit: 'mW',
-      desc: 'Static + Dynamic leakage',
+      value: powerVal,
+      unit: powerUnit,
+      desc: is7nm ? 'FinFET static leakage + dynamic' : 'Static cell leakage + dynamic',
       icon: Zap,
       color: 'from-accent/20 to-accent/5 border-accent/20',
       glow: 'shadow-cyanGlow',
@@ -42,9 +62,9 @@ export const PPAEstimation: React.FC<PPAEstimationProps> = ({ predictions }) => 
     },
     {
       title: 'Estimated Delay',
-      value: delay.toFixed(2),
-      unit: 'ns',
-      desc: 'Critical path gate delay',
+      value: delayVal,
+      unit: delayUnit,
+      desc: 'Critical path stage delay',
       icon: Timer,
       color: 'from-secondary/20 to-secondary/5 border-secondary/20',
       glow: 'shadow-blueGlow',
@@ -54,8 +74,8 @@ export const PPAEstimation: React.FC<PPAEstimationProps> = ({ predictions }) => 
     },
     {
       title: 'Max Clock Frequency',
-      value: maxFreq.toFixed(1),
-      unit: 'MHz',
+      value: freqVal,
+      unit: freqUnit,
       desc: 'Fmax boundary threshold',
       icon: Activity,
       color: 'from-success/20 to-success/5 border-success/20',

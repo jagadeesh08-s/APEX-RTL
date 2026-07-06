@@ -87,18 +87,15 @@ class RTLFeatureExtractor:
         # === NEW FEATURES ===
 
         # 11. Cyclomatic Complexity
-        # Standard software complexity estimate adjusted for HDL (if conditions, case statements, loops)
         loops = len(re.findall(r'\bfor\b|\bwhile\b|\bforever\b', self.clean_content))
         self.features['cyclomatic_complexity'] = 1 + self.features['max_if_depth'] + (self.features['num_case_statements'] * 3) + loops
 
         # 12. Fan-out Estimate
-        # Approximation of how heavily logic components drive wires
         total_drives = self.features['num_assigns'] + self.features['num_registers'] + self.features['num_inputs']
         total_sinks = max(1, self.features['num_wires'] + self.features['num_outputs'])
         self.features['fanout_estimate'] = float(round((total_drives * 2.5) / total_sinks, 2))
 
         # 13. AST Depth Estimate
-        # Based on block structures and begins/ends
         self.features['ast_depth'] = self.calculate_ast_depth()
 
         # 14. Parameters Count
@@ -110,19 +107,16 @@ class RTLFeatureExtractor:
         self.features['num_generate_blocks'] = len(generates)
 
         # 16. Memory Blocks Count
-        # Checks for multi-dimensional array declarations (e.g. reg [7:0] mem [0:255])
         memories = re.findall(r'\b(reg|wire|logic)\s+(?:\[\s*\d+\s*:\s*\d+\s*\]\s+)?\w+\s*\[\s*\d+\s*:\s*\d+\s*\]\s*\[', self.clean_content)
-        # fallback simple check for reg/wire array declarations
         if not memories:
             mem_arrays = re.findall(r'(?:reg|wire|logic)\s+(?:\[\s*\d+\s*:\s*\d+\s*\]\s+)?\w+\s*\[\s*\d+\s*:\s*\d+\s*\]\s*;', self.clean_content)
-            # count if range matches typical memory size (e.g., > 16 elements)
             mem_count = 0
             for array in mem_arrays:
                 dims = re.findall(r'\[\s*(\d+)\s*:\s*(\d+)\s*\]', array)
                 if len(dims) >= 1:
                     high, low = dims[-1]
                     size = abs(int(high) - int(low)) + 1
-                    if size >= 16: # likely a small register array or RAM
+                    if size >= 16:
                         mem_count += 1
             self.features['num_memory_blocks'] = mem_count
         else:
@@ -136,12 +130,14 @@ class RTLFeatureExtractor:
         self.features['fsm_state_count'] = self.estimate_fsm_state_count()
 
         # 19. Combinational Path Length Estimate
-        # Estimated count of nested operators/logic in combinational paths
         self.features['combinational_path_len'] = self.estimate_combinational_path_len()
 
         # 20. Pipeline Depth
-        # Sequential block register levels
         self.features['pipeline_depth'] = self.estimate_pipeline_depth()
+
+        # 21. Place & Route (P&R) Routing Congestion Factor
+        # Proxy: measures wiring density relative to maximum data bus widths
+        self.features['routing_congestion_factor'] = float(round((self.features['num_wires'] * self.features['fanout_estimate']) / max(1, self.features['bitwidth_max']), 2))
 
         return self.features
 
@@ -174,7 +170,6 @@ class RTLFeatureExtractor:
         return max_if_depth
 
     def calculate_ast_depth(self):
-        # Calculate maximum block nesting level
         lines = self.clean_content.split('\n')
         depth = 0
         max_depth = 0
@@ -189,15 +184,12 @@ class RTLFeatureExtractor:
         return max_depth
 
     def estimate_fsm_state_count(self):
-        # Scan for state parameter patterns (e.g. parameter STATE_A = 2'b00) or enum
         states = re.findall(r'(?:parameter|localparam)\s+\w+_[A-Z0-9_]+\s*=\s*\d+\b', self.clean_content)
         if len(states) > 0:
             return len(states)
         
-        # Alternatively, check state register width and count case options inside FSM blocks
-        state_vars = re.findall(r'\b(?:state|curr_state|next_state|r_state)\b', self.clean_content)
+        state_vars = re.findall(r'\b(state|curr_state|next_state|r_state)\b', self.clean_content)
         if state_vars:
-            # Look for case values
             case_options = re.findall(r'\b\d+\'[bdh][0-9a-fA-F]+\s*:', self.clean_content)
             if len(case_options) > 0:
                 return len(case_options)
@@ -205,20 +197,16 @@ class RTLFeatureExtractor:
         return 0
 
     def estimate_combinational_path_len(self):
-        # Logic operators and assignment density in combinational always/assign paths
         comb_ops = self.features['num_arithmetic_ops'] + self.features['num_logical_ops']
         if self.features['num_always_sequential'] > 0:
             return max(1, int(comb_ops / max(1, self.features['num_always_sequential'])))
         return comb_ops
 
     def estimate_pipeline_depth(self):
-        # Find sequential paths where signal transfers from one register to another
-        # (e.g. r_q1 <= r_d; r_q2 <= r_q1)
         non_blocking_assigns = re.findall(r'\w+\s*<=\s*\w+', self.clean_content)
         if not non_blocking_assigns:
             return 0
         
-        # Count variables that act as both source and destination in sequential blocks
         dests = set()
         srcs = set()
         for assign in non_blocking_assigns:
@@ -231,7 +219,6 @@ class RTLFeatureExtractor:
         return len(pipelines) + (1 if self.features['num_always_sequential'] > 0 else 0)
 
 if __name__ == "__main__":
-    # Test script self-check
     import json
     extractor = RTLFeatureExtractor("sample_designs/unoptimized_alu.v")
     print(json.dumps(extractor.extract_features(), indent=2))

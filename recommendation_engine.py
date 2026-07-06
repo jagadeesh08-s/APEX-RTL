@@ -4,9 +4,10 @@ import numpy as np
 import re
 
 class RTLRecommendationEngine:
-    def __init__(self, dataset_path="rtl_dataset.csv", importances_path="feature_importances.pkl"):
-        self.dataset_path = dataset_path
-        self.importances_path = importances_path
+    def __init__(self, node="45nm"):
+        self.node = node
+        self.dataset_path = f"rtl_dataset_{node}.csv"
+        self.importances_path = f"feature_importances_{node}.pkl"
         self.feature_importances = {}
         self.dataset_stats = {}
         self.load_reference_data()
@@ -27,7 +28,7 @@ class RTLRecommendationEngine:
                 'cyclomatic_complexity': 6.0, 'fanout_estimate': 2.5, 'ast_depth': 4.0,
                 'num_parameters': 2.0, 'num_generate_blocks': 0.5, 'num_memory_blocks': 0.2,
                 'num_signed_ops': 0.5, 'fsm_state_count': 2.0, 'combinational_path_len': 5.0,
-                'pipeline_depth': 2.0
+                'pipeline_depth': 2.0, 'routing_congestion_factor': 1.5
             }
 
         # Load feature importances
@@ -65,7 +66,7 @@ class RTLRecommendationEngine:
             deductions.append(("High Cyclomatic Complexity", penalty))
             recommendations.append({
                 "severity": "INFO",
-                "category": "DESIGN COMPLIXITY",
+                "category": "DESIGN COMPLEXITY",
                 "message": f"High Cyclomatic Complexity ({features['cyclomatic_complexity']}) detected in procedural blocks.",
                 "explanation": "High cyclomatic complexity indicates branching density which translates to complex multiplexer logic and routing congestion.",
                 "remedy": "Decompose large conditionals into smaller sub-modules or compute control signals in parallel."
@@ -123,7 +124,20 @@ class RTLRecommendationEngine:
                 "remedy": "Introduce pipeline registers along the datapath to break down logic depth and optimize operating frequency."
             })
 
-        dqs = max(10.0, dqs) # Keep DQS bounded
+        # Heuristic 6: High routing congestion
+        if features.get('routing_congestion_factor', 0) > 3.5:
+            penalty = 10
+            dqs -= penalty
+            deductions.append(("High Routing Congestion", penalty))
+            recommendations.append({
+                "severity": "WARNING",
+                "category": "PLACE & ROUTE",
+                "message": f"High estimated routing congestion factor ({features['routing_congestion_factor']}) detected.",
+                "explanation": "High wiring density relative to bus widths leads to routing overflows and layout congestion, increasing timing detours and post-synthesis gate footprints.",
+                "remedy": "Verify register allocations or reduce internal module wiring by decomposing global signals."
+            })
+
+        dqs = max(10.0, dqs)
 
         # Generate Explainable PPA Drivers (SHAP-like attribution)
         attributions = self.generate_attributions(features, predictions)
@@ -139,16 +153,13 @@ class RTLRecommendationEngine:
         attributions = {}
         for target in ['area', 'power', 'delay']:
             target_imps = self.feature_importances.get(target, {})
-            # Sort features by their predictive influence (importance) for this metric
             sorted_feats = sorted(target_imps.items(), key=lambda x: x[1], reverse=True)
             
-            # Find which features of this design deviate most from dataset average and have high importance
             contributions = []
             for feat, imp in sorted_feats[:4]:
                 avg_val = self.dataset_stats.get(feat, 1.0)
                 curr_val = features.get(feat, 0.0)
                 
-                # If current value is higher than average, it drives the metric up; if lower, it drives it down
                 ratio = curr_val / avg_val if avg_val > 0 else 1.0
                 impact = "neutral"
                 if ratio > 1.25 and imp > 0.04:
@@ -167,7 +178,6 @@ class RTLRecommendationEngine:
         return attributions
 
     def generate_optimized_rtl(self, code_content: str, recommendations) -> str:
-        # Automatically rewrite Verilog snippets for optimization preview comparison
         optimized = code_content
         
         has_deep_if = any(rec['message'].startswith('Deeply nested if-else') for rec in recommendations)
@@ -175,33 +185,20 @@ class RTLRecommendationEngine:
 
         # 1. Refactor nested if-else chain to case statement
         if has_deep_if:
-            # Detect nested if-else inside always blocks
-            # We can find standard patterns of nested else-ifs and flatter them
-            # E.g. replacing chains of:
-            # if (op == 4'b0000) begin ... end else if (op == 4'b0001) begin ... end
-            # with:
-            # case(op) 4'b0000: ... 4'b0001: ... default: ... endcase
-            
-            # Let's search for case selector variable candidate: e.g. "op" or "state"
             selector_match = re.search(r'if\s*\(\s*(\w+)\s*==', optimized)
             if selector_match:
                 selector = selector_match.group(1)
-                
-                # Match all branches: if/else if (selector == VAL) begin ... end
                 branches = re.findall(r'(?:if|else\s+if)\s*\(\s*' + selector + r'\s*==\s*([^)]+)\s*\)\s*(?:begin)?\s*([\s\S]*?)(?=\s*(?:else|end\s*always|end\b))', optimized)
                 
-                # Default branch
                 default_match = re.search(r'else\s+(?:begin\s+)?(?:out\s*<=\s*([^;]+);|([^{}]+))', optimized)
                 default_content = ""
                 if default_match:
                     default_content = default_match.group(2) or default_match.group(1)
                 
                 if len(branches) > 2:
-                    # Construct clean case statement
                     case_str = f"case ({selector})\n"
                     for val, body in branches:
                         body_clean = body.replace('begin', '').replace('end', '').strip()
-                        # Indent body
                         body_indented = "\n".join("            " + line.strip() for line in body_clean.split('\n') if line.strip())
                         case_str += f"            {val.strip()}: begin\n{body_indented}\n            end\n"
                     
@@ -212,13 +209,10 @@ class RTLRecommendationEngine:
                     
                     case_str += "        endcase"
                     
-                    # Replace the entire if-else procedural block in always
-                    # Find beginning of outer if to end
                     outer_if_pattern = r'if\s*\(\s*' + selector + r'\s*==[\s\S]+?end\s*else\s+begin[\s\S]+?end\s*end'
                     if re.search(outer_if_pattern, optimized):
                         optimized = re.sub(outer_if_pattern, case_str + "\n    ", optimized)
                     else:
-                        # Fallback simple replacement
                         always_block_match = re.search(r'always\s*@\s*\([\s\S]+?begin([\s\S]+?)end\s*endmodule', optimized)
                         if always_block_match:
                             procedural_content = always_block_match.group(1)
@@ -226,29 +220,18 @@ class RTLRecommendationEngine:
 
         # 2. Add pipeline register stage for multiplication
         if has_unpipelined_mult and "always @(posedge clk)" in optimized:
-            # Check if multiplier variable is assigned in combinational path or sequential path without registers
-            # Insert a pipelining register:
-            # reg [31:0] mult_reg;
-            # always @(posedge clk) begin
-            #     mult_reg <= a * b;
-            # end
             mult_match = re.search(r'(\w+)\s*<=\s*(\w+)\s*\*\s*(\w+);', optimized)
             if mult_match:
                 dest, src1, src2 = mult_match.group(1), mult_match.group(2), mult_match.group(3)
-                
-                # Check maximum bitwidth to size the register
                 width_match = re.search(r'reg\s+\[\s*(\d+)\s*:\s*0\s*\]\s+' + dest, optimized)
                 width_str = f"[{width_match.group(1)}:0]" if width_match else ""
                 
-                # Create pipeline code
                 pipeline_decl = f"    // Pipelined multiplier register stages\n    reg {width_str} mult_pipe_reg;\n    always @(posedge clk) begin\n        mult_pipe_reg <= {src1} * {src2};\n    end\n\n"
                 
-                # Insert declaration before the main always block
                 always_pos = optimized.find("always @")
                 if always_pos != -1:
                     optimized = optimized[:always_pos] + pipeline_decl + optimized[always_pos:]
                     
-                # Replace the multiplier assignment with reading from pipeline register
                 optimized = optimized.replace(f"{dest} <= {src1} * {src2};", f"{dest} <= mult_pipe_reg;")
 
         return optimized
