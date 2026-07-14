@@ -9,6 +9,7 @@ interface DashboardProps {
   onAnalysisStart: () => void;
   isAnalyzing: boolean;
   onTimelineStepChange: (step: number) => void;
+  apiEndpoint?: string;
 }
 
 const TEMPLATES: Record<string, { unoptimized: string; optimized: string; filename: string }> = {
@@ -316,6 +317,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onAnalysisStart,
   isAnalyzing,
   onTimelineStepChange,
+  apiEndpoint = 'http://localhost:8000'
 }) => {
   const [fileContent, setFileContent] = useState<string>(TEMPLATES.alu.unoptimized);
   const [filename, setFilename] = useState<string>('alu_unoptimized.v');
@@ -380,9 +382,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setError(null);
     setProgress(10);
     onTimelineStepChange(1); // Upload step
+    let interval: any;
 
     try {
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         setProgress((old) => {
           if (old >= 90) {
             clearInterval(interval);
@@ -401,7 +404,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       formData.append('file', codeBlob, filename);
       formData.append('node', activeNode);
       
-      const response = await axios.post('http://localhost:8000/api/analyze', formData, {
+      const response = await axios.post(`${apiEndpoint}/api/analyze`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
@@ -416,7 +419,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     } catch (err: any) {
       console.error(err);
-      clearInterval(progress);
+      clearInterval(interval);
       setProgress(0);
       onTimelineStepChange(0);
       onAnalysisSuccess(null);

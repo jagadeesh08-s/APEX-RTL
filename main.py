@@ -39,7 +39,7 @@ def run_analysis(filepath):
     # Check if models exist
     missing_models = []
     for target in ['area', 'power', 'delay']:
-        if not os.path.exists(f"model_{target}.pkl"):
+        if not os.path.exists(f"model_{target}_45nm.pkl"):
             missing_models.append(target)
             
     if missing_models:

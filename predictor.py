@@ -6,7 +6,13 @@ import time
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, r2_score
+try:
+    from sklearn.metrics import root_mean_squared_error
+except ImportError:
+    from sklearn.metrics import mean_squared_error
+    def root_mean_squared_error(y_true, y_pred):
+        return np.sqrt(mean_squared_error(y_true, y_pred))
 
 # Try to import XGBoost and LightGBM
 try:
@@ -144,7 +150,7 @@ class RTLPredictor:
             if model_key not in self.models:
                 with open(f"model_{target}_{node}.pkl", 'rb') as f:
                     self.models[model_key] = pickle.load(f)
-            predictions[target] = float(self.models[model_key].predict(df_in)[0])
+            predictions[target] = max(0.0, float(self.models[model_key].predict(df_in)[0]))
         
         inference_latency_ms = (time.time() - start_time) * 1000.0
         predictions["inference_latency_ms"] = float(inference_latency_ms)

@@ -307,6 +307,7 @@ export default function App() {
                     onAnalysisSuccess={handleAnalysisSuccess}
                     isAnalyzing={isAnalyzing}
                     onTimelineStepChange={setTimelineStep}
+                    apiEndpoint={apiEndpoint}
                   />
 
                   {/* Skeletons and Pipelines when actively predicting */}

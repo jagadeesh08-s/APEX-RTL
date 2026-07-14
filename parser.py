@@ -34,7 +34,7 @@ class RTLFeatureExtractor:
         # 2. Register and Wire declarations
         output_regs = len(re.findall(r'\boutput\s+reg\b', self.clean_content))
         regs = len(re.findall(r'\breg\b', self.clean_content))
-        self.features['num_registers'] = max(0, regs - output_regs)
+        self.features['num_registers'] = regs
         
         wires = re.findall(r'\bwire\b', self.clean_content)
         self.features['num_wires'] = len(wires)
